@@ -91,7 +91,7 @@ void worker() {
             words[move(word)]++;
         }
 
-        unique_lock<decltype(word_map.mutex)> word_map_lock(word_map.mutex);
+        lock_guard<decltype(word_map.mutex)> guard{word_map.mutex};
         word_map += move(words);
       }
 
@@ -115,7 +115,7 @@ main (int argc, char* argv[])
   size_t chars_in { 0 };
 
   locale::global(locale(""));
-  cout << wq.done << endl;
+
   try {
     cin.exceptions(ifstream::badbit | ifstream::failbit);
 
@@ -180,9 +180,8 @@ main (int argc, char* argv[])
 	  chars_in += text.size();
 
 	  { // push work to queue
-	    unique_lock<decltype(wq.mutex)> queue_lock(wq.mutex);
-            // Establish an input buffer limit.
-	    wq.changed.wait(queue_lock, [] {
+	    unique_lock<decltype(wq.mutex)> lock{wq.mutex};
+	    wq.changed.wait(lock, [] {
               return wq.size() < (thread::hardware_concurrency() << 8);
             });
 	    wq.push(move(text));
@@ -193,17 +192,18 @@ main (int argc, char* argv[])
       }
 
       if (threads.size() < thread::hardware_concurrency()) {
-        unique_lock<decltype(wq.mutex)> queue_lock(wq.mutex);
+        unique_lock<decltype(wq.mutex)> lock{wq.mutex};
         if (wq.size() > (thread::hardware_concurrency() << 7)) {
-	  queue_lock.unlock();
+	  lock.unlock();
 	  threads.emplace_back(worker);
         }
       }
 
       if (articles == 1000000) break;
     }
+
     {
-      unique_lock<decltype(wq.mutex)> queue_lock(wq.mutex);
+      lock_guard<decltype(wq.mutex)> guard{wq.mutex};
       wq.done = true;
     }
     wq.changed.notify_all();
