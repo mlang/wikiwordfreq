@@ -1,18 +1,15 @@
 #include <cctype>
 #include <chrono>
-#include <condition_variable>
-#include <deque>
 #include <fstream>
 #include <iostream>
 #include <locale>
-#include <mutex>
-#include <queue>
 #include <regex>
 #include <string>
-#include <thread>
 #include <unordered_map>
 
 #include <xml/parser>
+
+#include "distributor.hpp"
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/locale/encoding_utf.hpp>
@@ -27,68 +24,6 @@ word_map_type& operator+=(word_map_type &lhs, word_map_type &&rhs) {
   for (auto &&pair: rhs) lhs[std::move(pair.first)] += pair.second;
   return lhs;
 }
-
-template <typename Type, typename Queue = std::queue<Type>>
-class distributor: Queue, std::mutex, std::condition_variable {
-  typename Queue::size_type capacity;
-  bool done = false;
-  std::vector<std::thread> threads;
-
-public:
-  template<typename Function>
-  distributor( Function function
-             , unsigned int concurrency = std::thread::hardware_concurrency()
-	     , typename Queue::size_type max_items_per_thread = 256
-	     )
-  : capacity{concurrency * max_items_per_thread}
-  {
-    for (size_t i = 0; i < concurrency; ++i) {
-      threads.emplace_back(static_cast<void (distributor::*)(Function)>
-                           (&distributor::consume), this, function);
-    }
-  }
-
-  distributor(distributor &&) = default;
-  distributor(distributor const &) = delete;
-  distributor& operator=(distributor const &) = delete;
-
-  ~distributor() {
-    {
-      std::lock_guard<std::mutex> guard(*this);
-      done = true;
-    }
-    notify_all();
-    std::for_each(threads.begin(), threads.end(),
-                  std::mem_fun_ref(&std::thread::join));
-  }
-
-  void operator()(Type &&value) {
-    std::unique_lock<std::mutex> lock(*this);
-    while (Queue::size() < capacity) wait(lock);
-    Queue::push(std::forward<Type>(value));
-    notify_one();
-  }
-
-private:
-  template <typename Function>
-  void consume(Function process) {
-    std::unique_lock<std::mutex> lock(*this);
-    while (true) {
-      if (not Queue::empty()) {
-        Type item { std::move(Queue::front()) };
-        Queue::pop();
-        lock.unlock();
-        notify_one();
-        process(item);
-        lock.lock();
-      } else if (done) {
-        break;
-      } else {
-        wait(lock);
-      }
-    }
-  }
-};
 
 int
 main (int argc, char* argv[])
@@ -114,7 +49,7 @@ main (int argc, char* argv[])
     auto start_time = chrono::steady_clock::now();
     auto last_output = chrono::steady_clock::now();
 
-    distributor<std::string> q([](std::string &text) {
+    distributor<std::string> process([](std::string &text) {
       using namespace boost;
       replace_all(text, "align=\"right\"", "");
       replace_all(text, "align=\"center\"", "");
@@ -214,7 +149,7 @@ main (int argc, char* argv[])
 	  string text { stream.str() };
 	  chars_in += text.size();
 
-	  q(move(text));
+	  process(move(text));
         }
         break;
       }
