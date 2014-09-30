@@ -28,81 +28,67 @@ word_map_type& operator+=(word_map_type &lhs, word_map_type &&rhs) {
   return lhs;
 }
 
-struct : std::queue<std::string> {
-  std::mutex mutex;
-  std::condition_variable changed;
+template <typename Type, typename Queue = std::queue<Type>>
+class distributor: Queue, std::mutex, std::condition_variable {
+  typename Queue::size_type capacity;
   bool done = false;
-} wq;
+  std::vector<std::thread> threads;
 
-void worker() {
-  using namespace std;
-  using namespace boost;
-
-  unique_lock<decltype(wq.mutex)> queue_lock(wq.mutex);
-
-  while (true) {
-    if (not wq.empty()) {
-      string text { move(wq.front()) };
-      wq.pop();
-      queue_lock.unlock();
-      wq.changed.notify_one();
-
-      replace_all(text, "align=\"right\"", "");
-      replace_all(text, "align=\"center\"", "");
-      replace_all(text, "align=\"left\"", "");
-      replace_all(text, "valign=\"top\"", "");
-      replace_all(text, "class = \"wikitable\"", "");
-      replace_all(text, "style = \"text-align: center\"", "");
-      replace_all(text, "<br />", "\n");
-      replace_all(text, "<br style=\"clear:left\"/>", "\n");
-      replace_all(text, "<br clear=\"both\"/>", "\n");
-      replace_all(text, "&nbsp;", " ");
-      replace_all(text, "<references />", "");
-      replace_all(text, "<nowiki />", "");
-
-      static pair<regex, string> const patterns[] = {
-        { regex("<!--(.|\n)*?-->"
-  	    "|" "<math>.*?</math>"
-	    "|" "\\[\\[Datei:.*?\\]\\]"
-	    "|" "\\{\\{.*?\\}\\}"), "" },
-        { regex("\\[https?://[^ ]* (.*?)\\]"), "$1" },
-        { regex("\\[\\[Kategorie:(\\w*)\\]\\]"), "$1" },
-        { regex("\\[\\[Kategorie:(\\w*)\\|.*\\]\\]"), "$1" },
-        { regex("\\[\\[(.*?)\\]\\]"), "$1" },
-        { regex("<small>(.*?)</small>"), "$1" },
-        { regex("<sub>(.*?)</sub>"), "$1" },
-        { regex("<sup>(.*?)</sup>"), "$1" },
-        { regex("<tt>(.*?)</tt>"), "$1" },
-        { regex("<u>(.*?)</u>"), "$1" },
-        { regex("<ref(>| [^>]*>)(.*?)</ref>"), " $2 " },
-        { regex("<ref name=\"([^\"]*)\" ?/>"), " $1 " }
-      };
-
-      for (auto &&pat: patterns) {
-        text = regex_replace(text, pat.first, pat.second);
-      }
-
-      {
-        word_map_type words;
-        for (auto &&word: tokenizer<>(text)) {
-          wstring const wword { locale::conv::utf_to_utf<wstring::value_type>(word) };
-          if (wword.size() > 1 and
-              all_of(wword.begin(), wword.end(), static_cast<int(*)(wint_t)>(iswalpha)))
-            words[move(word)]++;
-        }
-
-        lock_guard<decltype(word_map.mutex)> guard{word_map.mutex};
-        word_map += move(words);
-      }
-
-      queue_lock.lock();
-    } else if (wq.done) {
-      break;
-    } else {
-      wq.changed.wait(queue_lock);
+public:
+  template<typename Function>
+  distributor( Function function
+             , unsigned int concurrency = std::thread::hardware_concurrency()
+	     , typename Queue::size_type max_items_per_thread = 256
+	     )
+  : capacity{concurrency * max_items_per_thread}
+  {
+    for (size_t i = 0; i < concurrency; ++i) {
+      threads.emplace_back(static_cast<void (distributor::*)(Function)>
+                           (&distributor::consume), this, function);
     }
   }
-}
+
+  distributor(distributor &&) = default;
+  distributor(distributor const &) = delete;
+  distributor& operator=(distributor const &) = delete;
+
+  ~distributor() {
+    {
+      std::lock_guard<std::mutex> guard(*this);
+      done = true;
+    }
+    notify_all();
+    std::for_each(threads.begin(), threads.end(),
+                  std::mem_fun_ref(&std::thread::join));
+  }
+
+  void operator()(Type &&value) {
+    std::unique_lock<std::mutex> lock(*this);
+    while (Queue::size() < capacity) wait(lock);
+    Queue::push(std::forward<Type>(value));
+    notify_one();
+  }
+
+private:
+  template <typename Function>
+  void consume(Function process) {
+    std::unique_lock<std::mutex> lock(*this);
+    while (true) {
+      if (not Queue::empty()) {
+        Type item { std::move(Queue::front()) };
+        Queue::pop();
+        lock.unlock();
+        notify_one();
+        process(item);
+        lock.lock();
+      } else if (done) {
+        break;
+      } else {
+        wait(lock);
+      }
+    }
+  }
+};
 
 int
 main (int argc, char* argv[])
@@ -128,7 +114,56 @@ main (int argc, char* argv[])
     auto start_time = chrono::steady_clock::now();
     auto last_output = chrono::steady_clock::now();
 
-    vector<thread> threads;
+    distributor<std::string> q([](std::string &text) {
+      using namespace boost;
+      replace_all(text, "align=\"right\"", "");
+      replace_all(text, "align=\"center\"", "");
+      replace_all(text, "align=\"left\"", "");
+      replace_all(text, "valign=\"top\"", "");
+      replace_all(text, "class = \"wikitable\"", "");
+      replace_all(text, "style = \"text-align: center\"", "");
+      replace_all(text, "<br />", "\n");
+      replace_all(text, "<br style=\"clear:left\"/>", "\n");
+      replace_all(text, "<br clear=\"both\"/>", "\n");
+      replace_all(text, "&nbsp;", " ");
+      replace_all(text, "<references />", "");
+      replace_all(text, "<nowiki />", "");
+
+      static pair<regex, string> const patterns[] = {
+	{ regex("<!--(.|\n)*?-->"
+	    "|" "<math>.*?</math>"
+	    "|" "\\[\\[Datei:.*?\\]\\]"
+	    "|" "\\{\\{.*?\\}\\}"), "" },
+	{ regex("\\[https?://[^ ]* (.*?)\\]"), "$1" },
+	{ regex("\\[\\[Kategorie:(\\w*)\\]\\]"), "$1" },
+	{ regex("\\[\\[Kategorie:(\\w*)\\|.*\\]\\]"), "$1" },
+	{ regex("\\[\\[(.*?)\\]\\]"), "$1" },
+	{ regex("<small>(.*?)</small>"), "$1" },
+	{ regex("<sub>(.*?)</sub>"), "$1" },
+	{ regex("<sup>(.*?)</sup>"), "$1" },
+	{ regex("<tt>(.*?)</tt>"), "$1" },
+	{ regex("<u>(.*?)</u>"), "$1" },
+	{ regex("<ref(>| [^>]*>)(.*?)</ref>"), " $2 " },
+	{ regex("<ref name=\"([^\"]*)\" ?/>"), " $1 " }
+      };
+
+      for (auto &&pat: patterns) {
+	text = regex_replace(text, pat.first, pat.second);
+      }
+
+      {
+	word_map_type words;
+	for (auto &&word: tokenizer<>(text)) {
+	  wstring const wword { locale::conv::utf_to_utf<wstring::value_type>(word) };
+	  if (wword.size() > 1 and
+	      all_of(wword.begin(), wword.end(), static_cast<int(*)(wint_t)>(iswalpha)))
+	    words[move(word)]++;
+	}
+
+	lock_guard<decltype(word_map.mutex)> guard{word_map.mutex};
+	word_map += move(words);
+      }
+    });
     
     for (auto event = p.next(); event != xml::parser::eof; event = p.next()) {
       switch (event) {
@@ -179,35 +214,13 @@ main (int argc, char* argv[])
 	  string text { stream.str() };
 	  chars_in += text.size();
 
-	  { // push work to queue
-	    unique_lock<decltype(wq.mutex)> lock{wq.mutex};
-	    wq.changed.wait(lock, [] {
-              return wq.size() < (thread::hardware_concurrency() << 8);
-            });
-	    wq.push(move(text));
-	  }
-          wq.changed.notify_one();
+	  q(move(text));
         }
         break;
       }
 
-      if (threads.size() < thread::hardware_concurrency()) {
-        unique_lock<decltype(wq.mutex)> lock{wq.mutex};
-        if (wq.size() > (thread::hardware_concurrency() << 7)) {
-	  lock.unlock();
-	  threads.emplace_back(worker);
-        }
-      }
-
       if (articles == 1000000) break;
     }
-
-    {
-      lock_guard<decltype(wq.mutex)> guard{wq.mutex};
-      wq.done = true;
-    }
-    wq.changed.notify_all();
-    for (auto &&thread: threads) thread.join();
   } catch (const ios_base::failure&) {
     cerr << "io failure" << endl;
     return EXIT_FAILURE;
@@ -216,8 +229,7 @@ main (int argc, char* argv[])
     return EXIT_FAILURE;
   }
 
-  for (auto &&pair: word_map)
-    if (pair.second > 1) cout << pair.second << " " << pair.first << '\n';
+  for (auto &&pair: word_map) cout << pair.second << " " << pair.first << '\n';
 
   return EXIT_SUCCESS;
 }
