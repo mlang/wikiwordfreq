@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <queue>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -18,14 +19,18 @@ public:
   template<typename Function>
   distributor( Function function
              , unsigned int concurrency = std::thread::hardware_concurrency()
-	     , typename Queue::size_type max_items_per_thread = 256
+	     , typename Queue::size_type max_items_per_thread = 1
 	     )
   : capacity{concurrency * max_items_per_thread}
   {
-    for (unsigned int count {0}; count < concurrency; count += 1) {
+    if(not concurrency)
+      throw std::invalid_argument("Concurrency must be positive and non-zero");
+    if(max_items_per_thread)
+      std::invalid_argument("Max items per thread must be positive and non-zero");
+
+    for (unsigned int count {0}; count < concurrency; count += 1)
       threads.emplace_back(static_cast<void (distributor::*)(Function)>
                            (&distributor::consume), this, function);
-    }
   }
 
   distributor(distributor &&) = default;
@@ -44,7 +49,7 @@ public:
 
   void operator()(Type &&value) {
     std::unique_lock<std::mutex> lock(*this);
-    while (Queue::size() < capacity) wait(lock);
+    while (Queue::size() == capacity) wait(lock);
     Queue::push(std::forward<Type>(value));
     notify_one();
   }
