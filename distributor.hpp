@@ -13,6 +13,11 @@ class distributor: Queue, std::mutex, std::condition_variable {
   typename Queue::size_type capacity;
   bool done = false;
   std::vector<std::thread> threads;
+  using Queue::emplace;
+  using Queue::empty;
+  using Queue::front;
+  using Queue::pop;
+  using Queue::size;
 
 public:
   template<typename Function>
@@ -36,6 +41,14 @@ public:
   distributor(distributor &&) = delete;
   distributor &operator=(distributor &&) = delete;
 
+  template<typename... Args>
+  void operator()(Args&&... args) {
+    std::unique_lock<std::mutex> lock(*this);
+    while (size() == capacity) wait(lock);
+    emplace(std::forward<Args>(args)...);
+    notify_one();
+  }
+
   ~distributor() {
     {
       std::lock_guard<std::mutex> guard(*this);
@@ -45,22 +58,14 @@ public:
     for (auto &&thread: threads) thread.join();
   }
 
-  template<typename... Args>
-  void operator()(Args&&... args) {
-    std::unique_lock<std::mutex> lock(*this);
-    while (Queue::size() == capacity) wait(lock);
-    Queue::emplace(std::forward<Args>(args)...);
-    notify_one();
-  }
-
 private:
   template <typename Function>
   void consume(Function process) {
     std::unique_lock<std::mutex> lock(*this);
     while (true) {
-      if (not Queue::empty()) {
-        Type item { std::move(Queue::front()) };
-        Queue::pop();
+      if (not empty()) {
+        Type item { std::move(front()) };
+        pop();
         notify_one();
         lock.unlock();
         process(item);
