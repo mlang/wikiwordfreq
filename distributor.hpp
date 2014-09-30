@@ -23,8 +23,8 @@ public:
   template<typename Function>
   distributor( Function function
              , unsigned int concurrency = std::thread::hardware_concurrency()
-	     , typename Queue::size_type max_items_per_thread = 1
-	     )
+             , typename Queue::size_type max_items_per_thread = 1
+             )
   : capacity{concurrency * max_items_per_thread}
   {
     if (not concurrency)
