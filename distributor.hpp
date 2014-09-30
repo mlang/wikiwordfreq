@@ -26,7 +26,7 @@ public:
     if(not concurrency)
       throw std::invalid_argument("Concurrency must be positive and non-zero");
     if(max_items_per_thread)
-      std::invalid_argument("Max items per thread must be positive and non-zero");
+      throw std::invalid_argument("Max items per thread must be positive and non-zero");
 
     for (unsigned int count {0}; count < concurrency; count += 1)
       threads.emplace_back(static_cast<void (distributor::*)(Function)>
