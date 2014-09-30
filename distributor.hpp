@@ -33,9 +33,9 @@ public:
                            (&distributor::consume), this, function);
   }
 
-  distributor(distributor &&) = default;
-  distributor(distributor const &) = delete;
-  distributor& operator=(distributor const &) = delete;
+  // disable move
+  distributor(distributor &&) = delete;
+  distributor &operator=(distributor &&) = delete;
 
   ~distributor() {
     {
