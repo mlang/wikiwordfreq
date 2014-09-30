@@ -1,7 +1,6 @@
 #ifndef DISTRIBUTOR_HPP
 #define DISTRIBUTOR_HPP
 
-#include <algorithm>
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -23,10 +22,10 @@ public:
 	     )
   : capacity{concurrency * max_items_per_thread}
   {
-    if(not concurrency)
-      throw std::invalid_argument("Concurrency must be positive and non-zero");
-    if(max_items_per_thread)
-      throw std::invalid_argument("Max items per thread must be positive and non-zero");
+    if (not concurrency)
+      throw std::invalid_argument("Concurrency must be non-zero");
+    if (not max_items_per_thread)
+      throw std::invalid_argument("Max items per thread must be non-zero");
 
     for (unsigned int count {0}; count < concurrency; count += 1)
       threads.emplace_back(static_cast<void (distributor::*)(Function)>
@@ -43,8 +42,7 @@ public:
       done = true;
       notify_all();
     }
-    std::for_each(threads.begin(), threads.end(),
-                  std::mem_fun_ref(&std::thread::join));
+    for (auto &&thread: threads) thread.join();
   }
 
   void operator()(Type &&value) {
