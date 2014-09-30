@@ -45,10 +45,11 @@ public:
     for (auto &&thread: threads) thread.join();
   }
 
-  void operator()(Type &&value) {
+  template<typename... Args>
+  void operator()(Args&&... args) {
     std::unique_lock<std::mutex> lock(*this);
     while (Queue::size() == capacity) wait(lock);
-    Queue::push(std::forward<Type>(value));
+    Queue::emplace(std::forward<Args>(args)...);
     notify_one();
   }
 
