@@ -41,8 +41,8 @@ public:
     {
       std::lock_guard<std::mutex> guard(*this);
       done = true;
+      notify_all();
     }
-    notify_all();
     std::for_each(threads.begin(), threads.end(),
                   std::mem_fun_ref(&std::thread::join));
   }
@@ -62,8 +62,8 @@ private:
       if (not Queue::empty()) {
         Type item { std::move(Queue::front()) };
         Queue::pop();
-        lock.unlock();
         notify_one();
+        lock.unlock();
         process(item);
         lock.lock();
       } else if (done) {
