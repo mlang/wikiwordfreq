@@ -9,63 +9,62 @@
 #include <vector>
 
 template <typename Type, typename Queue = std::queue<Type>>
-class distributor: Queue, std::mutex, std::condition_variable {
-  typename Queue::size_type capacity;
+class distributor: std::mutex, std::condition_variable
+{
   bool done = false;
-  std::vector<std::thread> threads;
-  using Queue::emplace;
-  using Queue::empty;
-  using Queue::front;
-  using Queue::pop;
-  using Queue::size;
+  Queue queue;
+  struct : std::vector<std::thread> {
+    void join() { for_each(begin(), end(), mem_fun_ref(&value_type::join)); }
+  } threads;
+
+  using lock_guard = std::lock_guard<std::mutex>;
+  using unique_lock = std::unique_lock<std::mutex>;
 
 public:
   template<typename Function>
-  distributor( Function function
+  distributor( Function&& function
              , unsigned int concurrency = std::thread::hardware_concurrency()
-             , typename Queue::size_type max_items_per_thread = 1
              )
-  : capacity{concurrency * max_items_per_thread}
   {
     if (not concurrency)
-      throw std::invalid_argument("Concurrency must be non-zero");
-    if (not max_items_per_thread)
-      throw std::invalid_argument("Max items per thread must be non-zero");
+      throw std::invalid_argument("Concurrency must not be zero");
 
-    for (unsigned int count {0}; count < concurrency; count += 1)
+    for (unsigned int count {}; count < concurrency; ++count)
       threads.emplace_back(static_cast<void (distributor::*)(Function)>
-                           (&distributor::consume), this, function);
+                           (&distributor::consume), this,
+                           std::forward<Function>(function));
   }
 
   // disable move
   distributor(distributor &&) = delete;
   distributor &operator=(distributor &&) = delete;
 
-  template<typename... Args>
-  void operator()(Args&&... args) {
-    std::unique_lock<std::mutex> lock(*this);
-    while (size() == capacity) wait(lock);
-    emplace(std::forward<Args>(args)...);
+  template<typename... Args> distributor& operator()(Args&&... args)
+  {
+    unique_lock lock { *this };
+    while (queue.size() == threads.size()) wait(lock);
+    queue.emplace(std::forward<Args>(args)...);
     notify_one();
   }
 
-  ~distributor() {
-    {
-      std::lock_guard<std::mutex> guard(*this);
-      done = true;
-      notify_all();
-    }
-    for (auto &&thread: threads) thread.join();
+  ~distributor()
+  {
+    lock();
+    done = true;
+    notify_all();
+    unlock();
+    threads.join();
   }
 
 private:
   template <typename Function>
-  void consume(Function process) {
-    std::unique_lock<std::mutex> lock(*this);
+  void consume(Function process)
+  {
+    unique_lock lock { *this };
     while (true) {
-      if (not empty()) {
-        Type item { std::move(front()) };
-        pop();
+      if (not queue.empty()) {
+        Type item { std::move(queue.front()) };
+        queue.pop();
         notify_one();
         lock.unlock();
         process(item);
