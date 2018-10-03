@@ -1,0 +1,37 @@
+name:                wikiwc
+version:             0.1.0.0
+github:              "mlang/wikiwordfreq"
+license:             BSD3
+author:              "Mario Lang"
+maintainer:          "mlang@blind.guru"
+copyright:           "2018 Mario Lang"
+
+extra-source-files:
+- README.md
+
+synopsis:            Word frequency counter for Wikipedia dumps
+category:            Text
+
+description:         A simple word frequency counter
+
+dependencies:
+- async
+- attoparsec
+- base >= 4.7 && < 5
+- containers
+- extra
+- Glob
+- text
+
+library:
+  source-dirs: src
+
+executables:
+  wikiwc:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    dependencies:
+    - wikiwc

@@ -1,0 +1,6 @@
+.stack-work/
+wikiwc.cabal
+*wiki-latest-pages-articles.xml.bz2
+wikiextractor/
+extracted/
+*~
