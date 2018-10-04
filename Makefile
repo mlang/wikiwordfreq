@@ -1,4 +1,4 @@
-CHUNKSIZE=100M
+CHUNKSIZE=10M
 GIT=git
 STACK=stack
 WGET=wget
@@ -6,7 +6,7 @@ WIKILANG=de
 
 wikiwc.$(WIKILANG): extracted
 	$(STACK) build
-	$(STACK) exec wikiwc -- 'extracted/*/wiki_*' >$@
+	$(STACK) exec wikiwc -- 'extracted/*/wiki_*' +RTS -N >$@
 
 clean:
 	rm wikiwc.$(WIKILANG) $(WIKILANG)wiki-latest-pages-articles.xml.bz2
