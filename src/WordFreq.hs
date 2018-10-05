@@ -61,17 +61,24 @@ normalize = WordFreq
              in (k, a + sum (snd <$> xs'))
 
 commonSequences :: WordFreq Text -> WordFreq Text
-commonSequences = WordFreq . clean . Map.foldrWithKey f mempty . unWordFreq where
-  f k a m = let l = Text.length k
-            in foldr (uncurry $ Map.insertWith (+)) m [
-                 (Text.toLower $ Text.take n $ Text.drop i k, a)
-               | i <- [0  .. l - 1], n <- [1 .. l - i]
-               ]
-  clean = Map.foldrWithKey coinvert mempty . fmap reduce . foldr invert mempty . Map.toList
-  invert (k, a) = Map.insertWith mappend a [k]
-  coinvert a ks m = foldr (\k m -> Map.insert k a m) m ks
-  reduce d = let (x:xs) = sortBy (comparing (Down . Text.length)) d
-             in x:filter (not . (`Text.isInfixOf` x)) xs where
+commonSequences = WordFreq
+                . clean . Map.foldrWithKey subseqs mempty
+                . unWordFreq where
+  subseqs k a m = let l = Text.length k
+                  in foldr (uncurry $ Map.insertWith (+)) m [
+                       (Text.toLower $ Text.take n $ Text.drop i k, a)
+                     | i <- [0  .. l - 1], n <- [1 .. l - i]
+                     ]
+  clean = Map.foldrWithKey' coinvert mempty
+        . fmap reduce
+        . Map.foldrWithKey invert mempty where
+    invert k a = Map.insertWith mappend a [k]
+    coinvert a ks m = foldr (\k m -> Map.insert k a m) m ks
+    reduce d = let xs = sortBy (comparing (Down . Text.length)) d
+               in foldr f xs xs where
+      f x xs = case break (== x) xs of
+                 (_, []) -> xs
+                 (ls, _:rs) -> ls ++ (x : filter (not . (`Text.isInfixOf` x)) rs)
 
 loadWordList :: FilePath -> IO (Set Text)
 loadWordList = fmap (Set.fromList . map Text.toLower . Text.lines)
