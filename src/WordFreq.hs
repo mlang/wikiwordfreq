@@ -1,7 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 module WordFreq (
-  loadWikiDump, WordFreq, filterWordFreq, foldWordFreq, addWord, normalize
+  loadWikiDump, WordFreq, filterWordFreq, foldWordFreq, addWord
+, commonSequences, normalize
 , loadWordList, knownWord
 ) where
 
@@ -10,6 +11,7 @@ import Control.Monad (void)
 import Control.Monad.Extra (ifM)
 import Data.Attoparsec.Text
 import Data.Char (isAlpha)
+import Data.Foldable (foldr)
 import Data.List (sortBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -18,7 +20,7 @@ import Data.Ord (Down(Down), comparing)
 import Data.Set (Set)
 import qualified Data.Set as Set (fromList, member)
 import Data.Text (Text)
-import qualified Data.Text as Text (copy, lines, pack, toLower)
+import qualified Data.Text as Text
 import qualified Data.Text.IO as Text (readFile, hGetChunk)
 import System.IO (withFile, IOMode(ReadMode))
 import GHC.Base (($!))
@@ -57,6 +59,19 @@ normalize = WordFreq
   lc k a = Map.insertWith mappend (Text.toLower k) [(k, a)]
   merge xs = let ((k, a):xs') = sortBy (comparing (Down . snd)) xs 
              in (k, a + sum (snd <$> xs'))
+
+commonSequences :: WordFreq Text -> WordFreq Text
+commonSequences = WordFreq . clean . Map.foldrWithKey f mempty . unWordFreq where
+  f k a m = let l = Text.length k
+            in foldr (uncurry $ Map.insertWith (+)) m [
+                 (Text.toLower $ Text.take n $ Text.drop i k, a)
+               | i <- [0  .. l - 1], n <- [1 .. l - i]
+               ]
+  clean = Map.foldrWithKey coinvert mempty . fmap reduce . foldr invert mempty . Map.toList
+  invert (k, a) = Map.insertWith mappend a [k]
+  coinvert a ks m = foldr (\k m -> Map.insert k a m) m ks
+  reduce d = let (x:xs) = sortBy (comparing (Down . Text.length)) d
+             in x:filter (not . (`Text.isInfixOf` x)) xs where
 
 loadWordList :: FilePath -> IO (Set Text)
 loadWordList = fmap (Set.fromList . map Text.toLower . Text.lines)

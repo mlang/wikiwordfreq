@@ -23,7 +23,7 @@ run match = do
   map <- normalize . foldl' mappend mempty <$> (mapConcurrently loadWikiDump =<< glob match)
   let known = filterWordFreq (knownWord words) (const True) map
   let unknown = filterWordFreq (not . knownWord words) (> 1) map
-  Text.putStr $ foldWordFreq showWord known
+  Text.putStr $ foldWordFreq showWord (commonSequences known)
 
 showWord :: Text -> Int -> Text
 showWord s i = Text.pack (show i) <> " " <> s <> "\n"
