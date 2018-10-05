@@ -20,7 +20,7 @@ main = do
 
 run match = do
   words <- loadWordList "/usr/share/dict/ngerman" 
-  map <- foldl' mappend mempty <$> (mapConcurrently loadWikiDump =<< glob match)
+  map <- normalize . foldl' mappend mempty <$> (mapConcurrently loadWikiDump =<< glob match)
   let known = filterWordFreq (knownWord words) (const True) map
   let unknown = filterWordFreq (not . knownWord words) (> 1) map
   Text.putStr $ foldWordFreq showWord known

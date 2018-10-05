@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 module WordFreq (
-  loadWikiDump, WordFreq, filterWordFreq, foldWordFreq, addWord
+  loadWikiDump, WordFreq, filterWordFreq, foldWordFreq, addWord, normalize
 , loadWordList, knownWord
 ) where
 
@@ -10,9 +10,11 @@ import Control.Monad (void)
 import Control.Monad.Extra (ifM)
 import Data.Attoparsec.Text
 import Data.Char (isAlpha)
+import Data.List (sortBy)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map (adjust, filterWithKey, foldMapWithKey, insert, member, unionWith)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
+import Data.Ord (Down(Down), comparing)
 import Data.Set (Set)
 import qualified Data.Set as Set (fromList, member)
 import Data.Text (Text)
@@ -47,6 +49,14 @@ foldWordFreq f = Map.foldMapWithKey f . unWordFreq
 addWord w = WordFreq . add . unWordFreq where
   add m | Map.member w m = Map.adjust (+ 1) w m
         | otherwise = Map.insert (Text.copy w) 1 m
+
+normalize :: WordFreq Text -> WordFreq Text
+normalize = WordFreq
+          . Map.fromList . Map.elems . fmap merge . Map.foldrWithKey lc mempty
+          . unWordFreq where
+  lc k a = Map.insertWith mappend (Text.toLower k) [(k, a)]
+  merge xs = let ((k, a):xs') = sortBy (comparing (Down . snd)) xs 
+             in (k, a + sum (snd <$> xs'))
 
 loadWordList :: FilePath -> IO (Set Text)
 loadWordList = fmap (Set.fromList . map Text.toLower . Text.lines)
