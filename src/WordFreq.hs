@@ -1,44 +1,48 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 module WordFreq (
   loadWikiDump, WordFreq, filterWordFreq, foldWordFreq, addWord
-, commonSequences, normalize
+, commonSequences, normalize, byFrequency
 , loadWordList, knownWord
 ) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (void)
 import Control.Monad.Extra (ifM)
+import Control.Parallel.Strategies
 import Data.Attoparsec.Text
 import Data.Char (isAlpha)
-import Data.Foldable (foldr)
-import Data.List (sortBy)
+import Data.Foldable (foldl')
+import Data.List (groupBy, sort, sortOn)
 import Data.Map.Strict (Map)
+import Data.IntMap.Strict (IntMap)
 import qualified Data.Map.Strict as Map
+import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (fromMaybe)
 import Data.Ord (Down(Down), comparing)
 import Data.Set (Set)
-import qualified Data.Set as Set (fromList, member)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.IO as Text (readFile, hGetChunk)
-import System.IO (withFile, IOMode(ReadMode))
+import qualified Data.Text.IO as Text
 import GHC.Base (($!))
+import System.IO (withFile, IOMode(ReadMode))
 
-wikiDump :: Parser (WordFreq Text)
-wikiDump = loop mempty where
-  loop ws = ifM atEnd (pure ws) $ do
-    w <- dirt *> takeWhile1 isWordy <* dirt
-    loop $! addWord w ws
+wikiDump :: WordFreq Text -> Parser (WordFreq Text)
+wikiDump ws = ifM atEnd (pure ws) $ do
+  w <- dirt *> takeWhile1 isWordy <* dirt
+  wikiDump $! addWord w ws
+ where
   dirt = many' $ startDoc <|> endDoc <|> notWordy
   startDoc = string "<doc " >> skipWhile (not . isEndOfLine) >> endOfLine
   endDoc   = string "</doc>" >> endOfLine
   notWordy = void $ satisfy $ not . isWordy
   isWordy = (||) <$> isAlpha <*> (== '-')
 
-loadWikiDump :: FilePath -> IO (WordFreq Text)
-loadWikiDump fp = withFile fp ReadMode $ \h ->
-  fromMaybe mempty . maybeResult <$> parseWith (Text.hGetChunk h) wikiDump ""
+loadWikiDump :: WordFreq Text -> FilePath -> IO (WordFreq Text)
+loadWikiDump wc fp = withFile fp ReadMode $ \h ->
+  fromMaybe mempty . maybeResult <$> parseWith (Text.hGetChunk h) (wikiDump wc) ""
 
 newtype WordFreq a = WordFreq { unWordFreq :: Map a Int } deriving (Eq)
 instance Ord a => Semigroup (WordFreq a) where
@@ -54,31 +58,39 @@ addWord w = WordFreq . add . unWordFreq where
 
 normalize :: WordFreq Text -> WordFreq Text
 normalize = WordFreq
-          . Map.fromList . Map.elems . fmap merge . Map.foldrWithKey lc mempty
+          . Map.fromList . Map.elems . fmap merge . Map.foldrWithKey' lc mempty
           . unWordFreq where
   lc k a = Map.insertWith mappend (Text.toLower k) [(k, a)]
-  merge xs = let ((k, a):xs') = sortBy (comparing (Down . snd)) xs 
-             in (k, a + sum (snd <$> xs'))
+  merge xs = let ((k, a):xs') = sortOn (Down . snd) xs 
+                 !a' = a + sum (snd <$> xs')
+             in (k, a')
 
 commonSequences :: WordFreq Text -> WordFreq Text
 commonSequences = WordFreq
-                . clean . Map.foldrWithKey subseqs mempty
+                . deleteInfix . Map.foldrWithKey' subseqs mempty
                 . unWordFreq where
-  subseqs k a m = let l = Text.length k
-                  in foldr (uncurry $ Map.insertWith (+)) m [
-                       (Text.toLower $ Text.take n $ Text.drop i k, a)
-                     | i <- [0  .. l - 1], n <- [1 .. l - i]
-                     ]
-  clean = Map.foldrWithKey' coinvert mempty
-        . fmap reduce
-        . Map.foldrWithKey invert mempty where
-    invert k a = Map.insertWith mappend a [k]
-    coinvert a ks m = foldr (\k m -> Map.insert k a m) m ks
-    reduce d = let xs = sortBy (comparing (Down . Text.length)) d
-               in foldr f xs xs where
-      f x xs = case break (== x) xs of
-                 (_, []) -> xs
-                 (ls, _:rs) -> ls ++ (x : filter (not . (`Text.isInfixOf` x)) rs)
+  subseqs :: Text -> Int -> Map Text Int -> Map Text Int
+  subseqs k a !m = let l = Text.length k
+                   in foldl' (flip $ uncurry $ Map.insertWith (+)) m [
+                        (Text.toLower $ Text.take n $ Text.drop i k, a)
+                      | i <- [0  .. l - 1], n <- [1 .. l - i]
+                      ]
+  deleteInfix m = Map.withoutKeys m $ mconcat $
+                  withStrategy (parList rdeepseq) $ map search $
+                  foldMap (breakDownBy Text.length) $
+                  Map.foldrWithKey' invert mempty m where
+    invert k a = IntMap.insertWith mappend a [k]
+    search (l, r) = Set.fromList $ concatMap (\x -> filter (`Text.isInfixOf` x) r) l
+    breakDownBy by = go . sortOn (Down . by) where
+      go [] = []
+      go (x:xs) = let b = by x in case break ((b /=) . by) xs of
+        (_, []) -> []
+        (xs', ys) -> (x:xs', ys) : go ys
+
+byFrequency :: WordFreq Text -> [(Int, Text)]
+byFrequency = IntMap.foldlWithKey' g [] . Map.foldrWithKey' f mempty . unWordFreq where
+  f k a = IntMap.insertWith (const (k:)) a [k]
+  g xs a ks = map (a,) (sort ks) ++ xs
 
 loadWordList :: FilePath -> IO (Set Text)
 loadWordList = fmap (Set.fromList . map Text.toLower . Text.lines)
