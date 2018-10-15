@@ -5,11 +5,28 @@
   <body>
     <h1>Word frequency counter</h1>
     <p>Taken from full wikipedia dumps.</p>
+    <p>Three lists are provided per language, all are sorted by frequency (descending):</p>
+    <dl>
+      <dt>known</dt>
+      <dd>A list of known (according to a wordlist) words.</dd>
+      <dt>unknown</dt>
+      <dd>Words which do not appear in the wordlist for the particular language.</dd>
+      <dt>known-subseq</dt>
+      <dd>All common subsequences of known words.</dd>
+    </dl>
+
     <ul>
       <li>de (German)
 	<ul>
-	  <li><a href="subseq.de.txt">Subsequences</a></li>
+          <li><a href="de/known.txt">known words</a></li>
+	  <li><a href="de/known-subseq.txt">known word substrings</a></li>
 	</ul>
+      </li>
+      <li>en (English)
+        <ul>
+          <li><a href="en/known.txt">known words</a></li>
+          <li><a href="en/known-subseq.txt">known word substrings</a></li>
+        </ul>
       </li>
     </ul>
   </body>
