@@ -1,20 +1,21 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
 module WordFreq (
   loadWikiDump, WordFreq, filterWordFreq, foldWordFreq, addWord
 , commonSequences, normalize, byFrequency
 , loadWordList, knownWord
 ) where
-
+import Debug.Trace (traceShow)
 import Control.Applicative ((<|>))
 import Control.Monad (void)
 import Control.Monad.Extra (ifM)
 import Control.Parallel.Strategies
-import Data.Attoparsec.Text
+import Data.Attoparsec.Text hiding (take)
 import Data.Char (isAlpha)
 import Data.Foldable (foldl')
-import Data.List (groupBy, sort, sortOn)
+import Data.List (groupBy, sort, sortBy, sortOn)
 import Data.Map.Strict (Map)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.Map.Strict as Map
@@ -70,27 +71,35 @@ commonSequences = WordFreq
                 . deleteInfix . Map.foldrWithKey' subseqs mempty
                 . unWordFreq where
   subseqs :: Text -> Int -> Map Text Int -> Map Text Int
-  subseqs k a !m = let l = Text.length k
+  subseqs k a !m = let lc = Text.toLower k
+                       l = Text.length lc
                    in foldl' (flip $ uncurry $ Map.insertWith (+)) m [
-                        (Text.toLower $ Text.take n $ Text.drop i k, a)
+                        (Text.take n $ Text.drop i lc, a)
                       | i <- [0  .. l - 1], n <- [1 .. l - i]
                       ]
   deleteInfix m = Map.withoutKeys m $ mconcat $
                   withStrategy (parList rdeepseq) $ map search $
-                  foldMap (breakDownBy Text.length) $
+                  foldMap (breakBy $ Down . Text.length) $
                   Map.foldrWithKey' invert mempty m where
     invert k a = IntMap.insertWith mappend a [k]
     search (l, r) = Set.fromList $ concatMap (\x -> filter (`Text.isInfixOf` x) r) l
-    breakDownBy by = go . sortOn (Down . by) where
+    breakBy by = go . sortOn fst . map (\a -> (by a, a)) where
+      chunksOf i ls = map (take i) (splitter ls) where
+        splitter [] = []
+        splitter l  = l : splitter (drop i l)
       go [] = []
-      go (x:xs) = let b = by x in case break ((b /=) . by) xs of
+      go ((b, a):xs) = case break ((b /=) . fst) xs of
         (_, []) -> []
-        (xs', ys) -> (x:xs', ys) : go ys
+        (xs', ys) -> let !ys' = map snd ys
+                         pieces = chunksOf 1000 $ a:map snd xs'
+                     in map (, ys') pieces ++ go ys
 
 byFrequency :: WordFreq Text -> [(Int, Text)]
-byFrequency = IntMap.foldlWithKey' g [] . Map.foldrWithKey' f mempty . unWordFreq where
+byFrequency = IntMap.foldlWithKey' g []
+            . withStrategy (parTraversable rdeepseq) . fmap sort
+            . Map.foldrWithKey' f mempty . unWordFreq where
   f k a = IntMap.insertWith (const (k:)) a [k]
-  g xs a ks = map (a,) (sort ks) ++ xs
+  g xs a ks = map (a,) ks ++ xs
 
 loadWordList :: FilePath -> IO (Set Text)
 loadWordList = fmap (Set.fromList . map Text.toLower . Text.lines)

@@ -4,9 +4,9 @@ STACK=stack
 WGET=wget
 WIKILANG=de
 
-docs/known.$(WIKILANG).txt docs/unknown.$(WIKILANG).txt) docs/subseq.$(WIKILANG).txt: extracted.$(WIKILANG)
+docs/$(WIKILANG)/known.txt docs/$(WIKILANG)/known-subseq.txt: extracted.$(WIKILANG)
 	$(STACK) build
-	$(STACK) exec wikiwc -- -w words.$(WIKILANG) -k docs/$(WIKILANG)/known.txt -u docs/$(WIKILANG)/unknown.txt -s docs/$(WIKILANG)/known-subseq.txt extracted.$(WIKILANG)/*/wiki_* +RTS -N
+	$(STACK) exec wikiwc -- -w words.$(WIKILANG) -k docs/$(WIKILANG)/known.txt -s docs/$(WIKILANG)/known-subseq.txt extracted.$(WIKILANG)/*/wiki_* +RTS -N
 
 clean:
 	rm wikiwc.$(WIKILANG) $(WIKILANG)wiki-latest-pages-articles.xml.bz2

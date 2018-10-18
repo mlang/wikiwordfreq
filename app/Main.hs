@@ -1,18 +1,16 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 module Main where
 
-import Control.Concurrent.Async (mapConcurrently)
-import Control.Monad (foldM)
-import Data.Foldable (foldl')
-import Data.Text (Text)
+import           Control.Concurrent.Async (mapConcurrently)
+import           Control.Monad (foldM)
+import           Data.Foldable (foldl')
+import           Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
-import System.FilePath.Glob (glob)
-import System.Environment (getArgs)
-import WordFreq
-import Options.Applicative
+import           Options.Applicative
+import           WordFreq
 
 data Options = Options {
   knownWordListFiles :: [FilePath]
@@ -32,8 +30,8 @@ programOptions =
 
 wikiwc :: Options -> IO ()
 wikiwc Options{..} = do
-  words <- foldl' mappend mempty <$> mapConcurrently loadWordList knownWordListFiles
-  wc <- normalize <$> foldM loadWikiDump mempty wikiExtractorFiles
+  !words <- foldl' mappend mempty <$> mapConcurrently loadWordList knownWordListFiles
+  !wc <- normalize <$> foldM loadWikiDump mempty wikiExtractorFiles
   let known = filterWordFreq (knownWord words) (const True) wc
   let unknown = filterWordFreq (not . knownWord words) (const True) wc
   case knownOutput of
@@ -55,5 +53,4 @@ main = wikiwc =<< execParser opts where
     <> header "wikiwc - Wikipedia word counter"
 
 toText :: [(Int, Text)] -> Text
-toText = foldMap f where
-  f (a, w) = Text.pack (show a) <> " " <> w <> "\n"
+toText = foldMap $ \(a, w) -> Text.pack (show a) <> " " <> w <> "\n"
